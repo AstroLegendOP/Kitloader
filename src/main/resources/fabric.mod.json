@@ -15,6 +15,9 @@
     "entrypoints": {
         "main": [
             "com.example.kitloader.KitLoaderMod"
+        ],
+        "client": [
+            "com.example.kitloader.KitLoaderClient"
         ]
     },
     "mixins": [],

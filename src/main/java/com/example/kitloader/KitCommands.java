@@ -9,6 +9,10 @@ import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.MenuProvider;
+import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.item.ItemStack;
 
 import java.util.ArrayList;
@@ -26,7 +30,15 @@ public class KitCommands {
                             .executes(KitCommands::listKits)
                             .then(Commands.argument("name", StringArgumentType.word())
                                     .suggests(KitCommands::suggestKits)
-                                    .executes(ctx -> loadKit(ctx, StringArgumentType.getString(ctx, "name"))))));
+                                    .executes(ctx -> loadKit(ctx, StringArgumentType.getString(ctx, "name")))))
+                    .then(Commands.literal("preview")
+                            .then(Commands.argument("name", StringArgumentType.word())
+                                    .suggests(KitCommands::suggestKits)
+                                    .executes(ctx -> previewKit(ctx, StringArgumentType.getString(ctx, "name")))))
+                    .then(Commands.literal("delete")
+                            .then(Commands.argument("name", StringArgumentType.word())
+                                    .suggests(KitCommands::suggestKits)
+                                    .executes(ctx -> deleteKit(ctx, StringArgumentType.getString(ctx, "name"))))));
         });
     }
 
@@ -108,6 +120,52 @@ public class KitCommands {
             }
         }
         source.sendSuccess(() -> Component.literal("Loaded kit \"" + name + "\"."), false);
+        return 1;
+    }
+
+    private static int previewKit(CommandContext<CommandSourceStack> ctx, String name) {
+        CommandSourceStack source = ctx.getSource();
+        ServerPlayer player = source.getPlayer();
+        if (player == null) {
+            source.sendFailure(Component.literal("Must be used by a player."));
+            return 0;
+        }
+        List<ItemStack> items = KitStorage.loadKit(source.getServer(), player, name);
+        if (items == null) {
+            source.sendFailure(Component.literal("Kit \"" + name + "\" could not be loaded (missing or corrupt). Press Tab after /kit preview to see your saved kits."));
+            return 0;
+        }
+        // Open a read-only chest screen with the kit's items. The menu holds a
+        // snapshot, so the saved kit can never be modified from the preview.
+        List<ItemStack> snapshot = new ArrayList<>(items);
+        player.openMenu(new MenuProvider() {
+            @Override
+            public Component getDisplayName() {
+                return Component.literal("Kit: " + name);
+            }
+
+            @Override
+            public AbstractContainerMenu createMenu(int containerId, Inventory inventory, Player owner) {
+                return new KitPreviewMenu(containerId, inventory, snapshot);
+            }
+        });
+        source.sendSuccess(() -> Component.literal("Previewing kit \"" + name + "\"."), false);
+        return 1;
+    }
+
+    private static int deleteKit(CommandContext<CommandSourceStack> ctx, String name) {
+        CommandSourceStack source = ctx.getSource();
+        ServerPlayer player = source.getPlayer();
+        if (player == null) {
+            source.sendFailure(Component.literal("Must be used by a player."));
+            return 0;
+        }
+        boolean deleted = KitStorage.deleteKit(name);
+        if (!deleted) {
+            source.sendFailure(Component.literal("No kit named \"" + name + "\" found."));
+            return 0;
+        }
+        source.sendSuccess(() -> Component.literal("Deleted kit \"" + name + "\"."), false);
         return 1;
     }
 

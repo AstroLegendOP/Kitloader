@@ -12,15 +12,23 @@ A Fabric mod for Minecraft 1.21.11, 26.1, 26.1.1, 26.1.2 and 26.2.
 - **`/kit load <name>`** - restore a kit, completely overriding the current inventory (main, armor and offhand)
 - **`/kit load <Tab>`** - see your saved kits with tab-completion while typing
 - **`/kit load`** - list all of your saved kits
+- **`/kit delete <name>`** - delete a saved kit (also tab-completed)
+- **`/kit preview <name>`** - open a read-only chest screen showing a kit's contents before loading it (also tab-completed)
 - Kits are stored per player and survive across Minecraft versions and game sessions
 - Items load back into their exact original slots
 - A single unreadable item (e.g. after a data format change) never invalidates a kit - it is skipped with a warning
+- **Client-side mode** - works with a client-only install on servers that do not have the mod
 
 ## Installation
 
 1. Install [Fabric Loader](https://fabricmc.net/use/installer/) 0.19.3+ for your Minecraft version
 2. Install [Fabric API](https://modrinth.com/mod/fabric-api)
 3. Drop the jar matching your Minecraft version into `.minecraft/mods/` (or the server's `mods/` folder for servers)
+
+The mod works both as a server mod and as a client-only mod:
+
+- **Server-side** - on singleplayer worlds and servers with the mod, `/kit` runs on the server and kits load in any game mode. Kits are stored per player under `config/kitloader/kits/<player-uuid>/`.
+- **Client-side** - with only the client install, `/kit save`, `/kit load <Tab>`, `/kit preview <name>` and `/kit delete` still work on any server. Because a client cannot change its inventory in survival, `/kit load` temporarily switches you to creative, applies the kit, and switches you back (requires cheats or `/gamemode` permission). Kits saved this way go to `config/kitloader/client-kits/`. In singleplayer the server-side path is used automatically. On servers with the mod, `/kit preview` opens a read-only chest screen; a client-only install shows the kit's contents in chat instead, since only the server can open container screens.
 
 Requires Java 25+.
 
@@ -50,7 +58,8 @@ Requires a JDK 25 and an internet connection.
 Kits are saved as JSON under the config folder:
 
 ```
-config/kitloader/kits/<player-uuid>/<kit-name>.json
+config/kitloader/kits/<player-uuid>/<kit-name>.json      # server-side kits
+config/kitloader/client-kits/<kit-name>.json             # client-side kits
 ```
 
 ## License

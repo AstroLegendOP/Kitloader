@@ -8,6 +8,7 @@ import com.google.gson.JsonNull;
 import com.google.gson.JsonObject;
 import com.mojang.serialization.JsonOps;
 import net.fabricmc.loader.api.FabricLoader;
+import net.minecraft.core.RegistryAccess;
 import net.minecraft.resources.RegistryOps;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
@@ -24,19 +25,34 @@ import java.util.stream.Stream;
 public class KitStorage {
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
 
+    private static Path kitsRoot() {
+        return FabricLoader.getInstance().getConfigDir().resolve("kitloader").resolve("kits");
+    }
+
     private static Path getKitDir(ServerPlayer player) {
-        return FabricLoader.getInstance().getConfigDir()
-                .resolve("kitloader")
-                .resolve("kits")
-                .resolve(player.getStringUUID());
+        return kitsRoot().resolve(player.getStringUUID());
+    }
+
+    /** Kits saved by the client-side command on a server that does not have the mod installed. */
+    private static Path clientKitsDir() {
+        return FabricLoader.getInstance().getConfigDir().resolve("kitloader").resolve("client-kits");
     }
 
     /** Saves a player's inventory (main 0-35, armor 36-39, offhand 40) as a named kit. */
     public static boolean saveKit(MinecraftServer server, ServerPlayer player, String name, List<ItemStack> items) {
-        Path dir = getKitDir(player);
+        RegistryOps<JsonElement> ops = RegistryOps.create(JsonOps.INSTANCE, server.registryAccess());
+        return saveTo(getKitDir(player), ops, name, items);
+    }
+
+    /** Saves a kit from the client into the shared client-side kit folder. */
+    public static boolean saveClientKit(RegistryAccess registryAccess, String name, List<ItemStack> items) {
+        RegistryOps<JsonElement> ops = RegistryOps.create(JsonOps.INSTANCE, registryAccess);
+        return saveTo(clientKitsDir(), ops, name, items);
+    }
+
+    private static boolean saveTo(Path dir, RegistryOps<JsonElement> ops, String name, List<ItemStack> items) {
         try {
             Files.createDirectories(dir);
-            RegistryOps<JsonElement> ops = RegistryOps.create(JsonOps.INSTANCE, server.registryAccess());
             JsonArray array = new JsonArray();
             for (ItemStack stack : items) {
                 if (stack.isEmpty()) {
@@ -50,9 +66,9 @@ public class KitStorage {
             root.add("items", array);
             root.addProperty("savedAt", System.currentTimeMillis());
             Files.writeString(dir.resolve(name + ".json"), GSON.toJson(root));
-            KitLoaderMod.LOGGER.info("Saved kit \"{}\" for {}", name, player.getName().getString());
+            KitLoaderMod.LOGGER.info("Saved kit \"{}\"", name);
             return true;
-        } catch (IOException e) {
+        } catch (Exception e) {
             KitLoaderMod.LOGGER.error("Failed to save kit \"{}\"", name, e);
             return false;
         }
@@ -70,8 +86,44 @@ public class KitStorage {
         if (file == null) {
             return null;
         }
+        RegistryOps<JsonElement> ops = RegistryOps.create(JsonOps.INSTANCE, server.registryAccess());
+        return readKit(file, ops, name);
+    }
+
+    /**
+     * Client-side load: reads the kit from the shared client folder, falling
+     * back to the per-player server folders written by the server-side mod.
+     */
+    public static List<ItemStack> loadClientKit(RegistryAccess registryAccess, String name) {
+        Path file = clientKitFile(name);
+        if (file == null) {
+            try {
+                file = findKitFile(name);
+            } catch (IOException e) {
+                KitLoaderMod.LOGGER.error("Failed to search for kit \"{}\"", name, e);
+                return null;
+            }
+        }
+        if (file == null) {
+            return null;
+        }
+        RegistryOps<JsonElement> ops = RegistryOps.create(JsonOps.INSTANCE, registryAccess);
+        return readKit(file, ops, name);
+    }
+
+    /** Formats a kit for a chat preview, e.g. "Diamond Sword x1, Iron Chestplate x1". Empty kit -> "". */
+    public static String describeKit(List<ItemStack> items) {
+        List<String> parts = new ArrayList<>();
+        for (ItemStack stack : items) {
+            if (!stack.isEmpty()) {
+                parts.add(stack.getHoverName().getString() + " x" + stack.getCount());
+            }
+        }
+        return String.join(", ", parts);
+    }
+
+    private static List<ItemStack> readKit(Path file, RegistryOps<JsonElement> ops, String name) {
         try {
-            RegistryOps<JsonElement> ops = RegistryOps.create(JsonOps.INSTANCE, server.registryAccess());
             JsonObject root = GSON.fromJson(Files.readString(file), JsonObject.class);
             if (root == null || !root.has("items") || !root.get("items").isJsonArray()) {
                 KitLoaderMod.LOGGER.error("Kit \"{}\" is missing the items array", name);
@@ -103,16 +155,39 @@ public class KitStorage {
     /** Returns the names of all kits saved for this player across all sessions and versions, sorted. */
     public static List<String> listKits(ServerPlayer player) {
         try {
-            return kitFiles().stream()
-                    .map(p -> p.getFileName().toString())
-                    .map(s -> s.substring(0, s.length() - ".json".length()))
-                    .distinct()
-                    .sorted()
-                    .collect(Collectors.toList());
+            return listNamesInDirs(kitFiles());
         } catch (IOException e) {
             KitLoaderMod.LOGGER.error("Failed to list kits for {}", player.getName().getString(), e);
             return List.of();
         }
+    }
+
+    /** All kit names visible to the client: client-side kits plus any server per-player kits on this machine. */
+    public static List<String> listAllClientKits() {
+        List<Path> files = new ArrayList<>();
+        Path dir = clientKitsDir();
+        if (Files.isDirectory(dir)) {
+            try (Stream<Path> stream = Files.list(dir)) {
+                stream.filter(p -> p.getFileName().toString().endsWith(".json")).forEach(files::add);
+            } catch (IOException e) {
+                KitLoaderMod.LOGGER.error("Failed to list client kits", e);
+            }
+        }
+        try {
+            files.addAll(kitFiles());
+        } catch (IOException e) {
+            KitLoaderMod.LOGGER.error("Failed to list server kits", e);
+        }
+        return listNamesInDirs(files);
+    }
+
+    private static List<String> listNamesInDirs(List<Path> files) {
+        return files.stream()
+                .map(p -> p.getFileName().toString())
+                .map(s -> s.substring(0, s.length() - ".json".length()))
+                .distinct()
+                .sorted()
+                .collect(Collectors.toList());
     }
 
     /**
@@ -122,14 +197,12 @@ public class KitStorage {
      * them keeps kits accessible across sessions.
      */
     private static List<Path> kitFiles() throws IOException {
-        Path kitsRoot = FabricLoader.getInstance().getConfigDir()
-                .resolve("kitloader")
-                .resolve("kits");
-        if (!Files.isDirectory(kitsRoot)) {
+        Path root = kitsRoot();
+        if (!Files.isDirectory(root)) {
             return List.of();
         }
         List<Path> result = new ArrayList<>();
-        try (Stream<Path> playerDirs = Files.list(kitsRoot)) {
+        try (Stream<Path> playerDirs = Files.list(root)) {
             for (Path dir : playerDirs.filter(Files::isDirectory).collect(Collectors.toList())) {
                 try (Stream<Path> files = Files.list(dir)) {
                     files.filter(p -> p.getFileName().toString().endsWith(".json"))
@@ -138,6 +211,59 @@ public class KitStorage {
             }
         }
         return result;
+    }
+
+    /** Deletes every saved file for a kit name, returning true if at least one was removed. */
+    public static boolean deleteKit(String name) {
+        try {
+            return deleteFromDir(kitFiles(), name);
+        } catch (IOException e) {
+            KitLoaderMod.LOGGER.error("Failed to delete kit \"{}\"", name, e);
+            return false;
+        }
+    }
+
+    /** Client-side delete: removes the kit from the shared client folder and any server per-player folders. */
+    public static boolean deleteClientKit(String name) {
+        boolean any = false;
+        Path dir = clientKitsDir();
+        if (Files.isDirectory(dir)) {
+            try {
+                if (Files.deleteIfExists(dir.resolve(name + ".json"))) {
+                    any = true;
+                }
+            } catch (IOException e) {
+                KitLoaderMod.LOGGER.error("Failed to delete kit \"{}\"", name, e);
+                return false;
+            }
+        }
+        try {
+            any |= deleteFromDir(kitFiles(), name);
+        } catch (IOException e) {
+            KitLoaderMod.LOGGER.error("Failed to delete kit \"{}\"", name, e);
+            return false;
+        }
+        return any;
+    }
+
+    private static boolean deleteFromDir(List<Path> files, String name) throws IOException {
+        boolean any = false;
+        for (Path file : files) {
+            if (file.getFileName().toString().equals(name + ".json")) {
+                Files.deleteIfExists(file);
+                any = true;
+            }
+        }
+        return any;
+    }
+
+    private static Path clientKitFile(String name) {
+        Path dir = clientKitsDir();
+        if (!Files.isDirectory(dir)) {
+            return null;
+        }
+        Path file = dir.resolve(name + ".json");
+        return Files.exists(file) ? file : null;
     }
 
     /** The most recently saved file for a kit name, or null if none exists. */
