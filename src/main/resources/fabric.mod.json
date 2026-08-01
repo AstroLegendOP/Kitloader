@@ -1,0 +1,27 @@
+{
+    "schemaVersion": 1,
+    "id": "kitloader",
+    "version": "${version}",
+    "name": "KitLoader",
+    "description": "Save your entire inventory - hotbar, armor and offhand - as named kits with /kit save, and restore them any time with /kit load. Kits are stored per player, survive across Minecraft versions, and load back into their exact original slots. Type /kit load <Tab> to see your saved kits.",
+    "authors": [
+        "Mayank",
+        "AFKZ Studio"
+    ],
+    "contact": {},
+    "license": "MIT",
+    "icon": "assets/kitloader/icon.png",
+    "environment": "*",
+    "entrypoints": {
+        "main": [
+            "com.example.kitloader.KitLoaderMod"
+        ]
+    },
+    "mixins": [],
+    "depends": {
+        "fabricloader": ">=0.16.0",
+        "fabric-api": "*",
+        "minecraft": "${minecraft_requirement}",
+        "java": ">=25"
+    }
+}

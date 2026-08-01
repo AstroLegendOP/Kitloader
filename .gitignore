@@ -1,0 +1,26 @@
+# Gradle
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.settings/
+.project
+.classpath
+bin/
+
+# Minecraft
+run/
+
+# Release jars (published as GitHub Release assets, not committed)
+dist/
+
+# Local stray artifacts
+fex_build.gradle
+v262.json
+vm.json

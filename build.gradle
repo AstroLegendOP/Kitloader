@@ -1,0 +1,93 @@
+buildscript {
+    repositories {
+        maven {
+            name = 'Fabric'
+            url = 'https://maven.fabricmc.net/'
+        }
+        mavenCentral()
+        gradlePluginPortal()
+    }
+    dependencies {
+        classpath "net.fabricmc:fabric-loom:1.17-SNAPSHOT"
+    }
+}
+
+plugins {
+    id 'maven-publish'
+}
+
+def mojangMapped = project.hasProperty('mojang_mappings') && project.mojang_mappings == 'true'
+
+// Minecraft 26.x ships pre-deobfuscated: the 'net.fabricmc.fabric-loom' id
+// (LoomNoRemapGradlePlugin) forces disableObfuscation=true, so no mappings
+// are configured or applied.
+// Minecraft 1.21.x-era versions are obfuscated: the plain 'fabric-loom' id
+// (LoomGradlePlugin) keeps obfuscation enabled so official Mojang mappings
+// can be used. The plugins block is static, so the plugin is applied
+// conditionally here.
+if (mojangMapped) {
+    apply plugin: 'fabric-loom'
+} else {
+    apply plugin: 'net.fabricmc.fabric-loom'
+}
+
+version = project.mod_version
+group = project.maven_group
+
+base {
+    archivesName = project.archives_base_name
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    // Minecraft and mappings
+    minecraft "com.mojang:minecraft:${project.minecraft_version}"
+
+    if (mojangMapped) {
+        // 1.21.x-era versions ship obfuscated and need Mojang official mappings,
+        // with mod dependencies resolved through the Loom runtime classpath.
+        mappings loom.officialMojangMappings()
+        modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
+        modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_version}"
+    } else {
+        // 26.x versions ship pre-deobfuscated; no mappings and plain implementation deps.
+        implementation "net.fabricmc:fabric-loader:${project.loader_version}"
+        implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_version}"
+    }
+}
+
+processResources {
+    inputs.property "version", project.version
+    inputs.property "minecraft_requirement", project.minecraft_requirement
+
+    filesMatching("fabric.mod.json") {
+        expand "version": project.version, "minecraft_requirement": project.minecraft_requirement
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    it.options.release = 25
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_25
+    targetCompatibility = JavaVersion.VERSION_25
+    withSourcesJar()
+}
+
+jar {
+    from("LICENSE") {
+        rename { "${it}_${project.base.archivesName.get()}" }
+    }
+}
+
+publishing {
+    publications {
+        mavenJava(MavenPublication) {
+            from components.java
+        }
+    }
+}
